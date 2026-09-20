@@ -6,10 +6,10 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "members",
-       uniqueConstraints = {
-           @UniqueConstraint(name = "uk_member_email", columnNames = "email"),
-           @UniqueConstraint(name = "uk_member_mobile", columnNames = "mobile_number")
-       })
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_member_email", columnNames = "email"),
+                @UniqueConstraint(name = "uk_member_mobile", columnNames = "mobile_number")
+        })
 public class Member {
 
     @Id
@@ -107,6 +107,7 @@ public class Member {
     public boolean isTermsAccepted() { return termsAccepted; }
     public void setTermsAccepted(boolean v) { this.termsAccepted = v; }
     public String getRole() { return role; }
+    public void setRole(String v) { this.role = v; }
     public String getStatus() { return status; }
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

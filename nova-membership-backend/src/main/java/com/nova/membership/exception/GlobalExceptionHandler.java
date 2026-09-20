@@ -17,6 +17,9 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.bind.ServletRequestBindingException;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
@@ -64,7 +67,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     ResponseEntity<ApiResponse> fileTooLarge() {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                .body(ApiResponse.error("Uploaded file is too large. Maximum allowed size is 5 MB."));
+                .body(ApiResponse.error("Uploaded file is too large. Photos can be up to 5 MB and songs up to 20 MB."));
+    }
+
+    /** new ResponseStatusException(NOT_FOUND, "...") thrown by services (song / volunteer not found). */
+    @ExceptionHandler(ResponseStatusException.class)
+    ResponseEntity<ApiResponse> statusException(ResponseStatusException ex) {
+        String reason = ex.getReason() != null ? ex.getReason() : "Request failed.";
+        return ResponseEntity.status(ex.getStatusCode()).body(ApiResponse.error(reason));
+    }
+
+    /** Missing @RequestParam / multipart part, e.g. uploading a song without the "file" field. */
+    @ExceptionHandler({ServletRequestBindingException.class, MissingServletRequestPartException.class})
+    ResponseEntity<ApiResponse> missingParameter(Exception ex) {
+        return ResponseEntity.badRequest().body(ApiResponse.error("A required field is missing. Please check the form and try again."));
     }
 
     @ExceptionHandler(MultipartException.class)

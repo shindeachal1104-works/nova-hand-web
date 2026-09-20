@@ -7,11 +7,19 @@ import com.nova.membership.dto.RegisterRequest;
 import com.nova.membership.entity.Member;
 import com.nova.membership.repository.MemberRepository;
 import com.nova.membership.security.JwtService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class MemberService {
@@ -19,25 +27,31 @@ public class MemberService {
     private final MemberRepository repository;
     private final FileStorageService fileStorageService;
     private final JwtService jwtService;
+    private final PasswordEncoder passwordEncoder;
+
+    /** E-mails (lower-case) that are promoted to the ADMIN role - set ADMIN_EMAILS on the server. */
+    private final Set<String> adminEmails;
 
     public MemberService(
             MemberRepository repository,
             FileStorageService fileStorageService,
-            JwtService jwtService
+            JwtService jwtService,
+            PasswordEncoder passwordEncoder,
+            @Value("${app.admin.emails:}") String adminEmails
     ) {
         this.repository = repository;
         this.fileStorageService = fileStorageService;
         this.jwtService = jwtService;
+        this.passwordEncoder = passwordEncoder;
+        this.adminEmails = Arrays.stream(adminEmails.split(","))
+                .map(e -> e.trim().toLowerCase(Locale.ROOT))
+                .filter(e -> !e.isEmpty())
+                .collect(Collectors.toSet());
     }
 
     /**
      * Registers the member and returns a JWT.
-     *
-     * NOTE:
-     * Password is intentionally stored as plain text here
-     * because this is being used for local testing.
-     *
-     * For production, use BCrypt hashing.
+     * The password is stored as a BCrypt hash.
      */
     @Transactional
     public AuthResult register(RegisterRequest r) {
@@ -130,14 +144,12 @@ public class MemberService {
                         : null
         );
 
-        /*
-         * Plain-text password.
-         *
-         * Example:
-         * User enters: Achal@123
-         * Database stores: Achal@123
-         */
-        m.setPasswordHash(r.getPassword());
+        m.setPasswordHash(passwordEncoder.encode(r.getPassword()));
+
+        // Members whose e-mail is in ADMIN_EMAILS become admins (can upload songs, review volunteers)
+        if (adminEmails.contains(email)) {
+            m.setRole("ADMIN");
+        }
 
         // Terms
         m.setTermsAccepted(r.isTermsAccepted());
@@ -166,6 +178,7 @@ public class MemberService {
     /**
      * Login using email OR mobile number.
      */
+    @Transactional
     public AuthResult login(LoginRequest r) {
 
         String id = r.identifier().trim();
@@ -183,19 +196,8 @@ public class MemberService {
             );
         }
 
-        /*
-         * Plain-text password comparison.
-         *
-         * Example:
-         * Database: Achal@123
-         * Login:    Achal@123
-         */
         Member member = found
-                .filter(m ->
-                        r.password().equals(
-                                m.getPasswordHash()
-                        )
-                )
+                .filter(m -> passwordMatches(r.password(), m.getPasswordHash()))
                 .orElseThrow(() ->
                         new BadCredentialsException(
                                 "Invalid email/mobile or password."
@@ -209,6 +211,17 @@ public class MemberService {
                     "Your account is not active. Please contact the NOVA team."
             );
         }
+
+        // Old accounts still have a plain-text password: convert it to BCrypt now that we know it.
+        if (!isBcrypt(member.getPasswordHash())) {
+            member.setPasswordHash(passwordEncoder.encode(r.password()));
+        }
+
+        // Promote to ADMIN if this e-mail is listed in ADMIN_EMAILS
+        if (adminEmails.contains(member.getEmail().toLowerCase(Locale.ROOT)) && !"ADMIN".equals(member.getRole())) {
+            member.setRole("ADMIN");
+        }
+        repository.save(member);
 
         // Generate JWT after successful login
         String token = jwtService.generateToken(
@@ -234,6 +247,19 @@ public class MemberService {
                                 "Member not found."
                         )
                 );
+    }
+
+    private static boolean isBcrypt(String stored) {
+        return stored != null && stored.startsWith("$2");
+    }
+
+    /** BCrypt hash -> normal check. Legacy plain-text value -> constant-time equality (upgraded on login). */
+    private boolean passwordMatches(String raw, String stored) {
+        if (raw == null || stored == null) return false;
+        if (isBcrypt(stored)) return passwordEncoder.matches(raw, stored);
+        return MessageDigest.isEqual(
+                raw.getBytes(StandardCharsets.UTF_8),
+                stored.getBytes(StandardCharsets.UTF_8));
     }
 
     /**

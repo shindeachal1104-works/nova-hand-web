@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
@@ -85,6 +87,20 @@ public class SecurityConfig {
                         )
                         .permitAll()
 
+                        // Music: anyone can list and stream (the <audio> tag cannot send a JWT header)
+                        .requestMatchers(HttpMethod.GET, "/api/songs", "/api/songs/**")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.HEAD, "/api/songs", "/api/songs/**")
+                        .permitAll()
+
+                        // Volunteer application form (no login needed)
+                        .requestMatchers(HttpMethod.POST, "/api/volunteers/apply")
+                        .permitAll()
+
+                        // Upload / delete songs, review volunteers: admin members only
+                        .requestMatchers("/api/admin/**")
+                        .hasRole("ADMIN")
+
                         // Everything else requires JWT authentication
                         .anyRequest()
                         .authenticated()
@@ -96,6 +112,12 @@ public class SecurityConfig {
                 );
 
         return http.build();
+    }
+
+    /** BCrypt for passwords (used by MemberService). */
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
     }
 
     @Bean
